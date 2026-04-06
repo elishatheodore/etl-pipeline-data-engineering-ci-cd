@@ -1,0 +1,51 @@
+# Core data processing
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=12.0.0
+
+# Kaggle API
+kaggle>=1.5.0
+
+# Azure libraries
+azure-storage-file-datalake>=12.14.0
+azure-identity>=1.12.0
+azure-keyvault-secrets>=4.7.0
+azure-monitor-query>=1.2.0
+azure-mgmt-datafactory>=2.8.0
+azure-mgmt-databricks>=2.1.0
+azure-mgmt-synapse>=2.1.0
+
+# AWS libraries
+boto3>=1.26.0
+botocore>=1.29.0
+
+# GCP libraries
+google-cloud-storage>=2.10.0
+google-cloud-bigquery>=3.11.0
+
+# Orchestration
+apache-airflow>=2.7.0
+prefect>=2.14.0
+
+# Databricks
+databricks-sdk>=0.15.0
+
+# Monitoring and logging
+prometheus-client>=0.17.0
+structlog>=23.1.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Development
+black>=23.7.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Utilities
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+jinja2>=3.1.0
+click>=8.1.0
+tqdm>=4.65.0

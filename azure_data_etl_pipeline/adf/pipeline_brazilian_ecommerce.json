@@ -1,0 +1,332 @@
+{
+  "name": "Brazilian_Ecommerce_ETL_Pipeline",
+  "properties": {
+    "description": "End-to-end ETL pipeline for Brazilian E-Commerce dataset using Azure Data Factory",
+    "activities": [
+      {
+        "name": "Download_Kaggle_Data",
+        "type": "DatabricksNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "notebookPath": "/ETL/01_Data_Ingestion/download_kaggle_data",
+          "baseParameters": {
+            "kaggle_dataset": "olistbr/brazilian-ecommerce",
+            "azure_storage_account": {
+              "value": "@pipeline().parameters.storageAccountName",
+              "type": "Expression"
+            },
+            "container_name": {
+              "value": "@pipeline().parameters.containerName",
+              "type": "Expression"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureDatabricks_LinkedService",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "Bronze_Layer_Transformation",
+        "type": "DatabricksNotebook",
+        "dependsOn": [
+          {
+            "activity": "Download_Kaggle_Data",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "notebookPath": "/ETL/02_Bronze_Layer/bronze_transformation",
+          "baseParameters": {
+            "source_path": {
+              "value": "@pipeline().parameters.rawDataPath",
+              "type": "Expression"
+            },
+            "bronze_path": {
+              "value": "@pipeline().parameters.bronzeDataPath",
+              "type": "Expression"
+            },
+            "storage_account": {
+              "value": "@pipeline().parameters.storageAccountName",
+              "type": "Expression"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureDatabricks_LinkedService",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "Silver_Layer_Transformation",
+        "type": "DatabricksNotebook",
+        "dependsOn": [
+          {
+            "activity": "Bronze_Layer_Transformation",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "notebookPath": "/ETL/03_Silver_Layer/silver_transformation",
+          "baseParameters": {
+            "bronze_path": {
+              "value": "@pipeline().parameters.bronzeDataPath",
+              "type": "Expression"
+            },
+            "silver_path": {
+              "value": "@pipeline().parameters.silverDataPath",
+              "type": "Expression"
+            },
+            "storage_account": {
+              "value": "@pipeline().parameters.storageAccountName",
+              "type": "Expression"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureDatabricks_LinkedService",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "Gold_Layer_Transformation",
+        "type": "DatabricksNotebook",
+        "dependsOn": [
+          {
+            "activity": "Silver_Layer_Transformation",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "notebookPath": "/ETL/04_Gold_Layer/gold_transformation",
+          "baseParameters": {
+            "silver_path": {
+              "value": "@pipeline().parameters.silverDataPath",
+              "type": "Expression"
+            },
+            "gold_path": {
+              "value": "@pipeline().parameters.goldDataPath",
+              "type": "Expression"
+            },
+            "storage_account": {
+              "value": "@pipeline().parameters.storageAccountName",
+              "type": "Expression"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureDatabricks_LinkedService",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "Load_to_Synapse",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "Gold_Layer_Transformation",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "storedProcedureName": "dbo.sp_load_gold_data",
+          "storedProcedureParameters": {
+            "gold_path": {
+              "value": {
+                "value": "@pipeline().parameters.goldDataPath",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "storage_account": {
+              "value": {
+                "value": "@pipeline().parameters.storageAccountName",
+                "type": "Expression"
+              },
+              "type": "String"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "AzureSynapseAnalytics_LinkedService",
+          "type": "LinkedServiceReference"
+        }
+      },
+      {
+        "name": "Update_Fabric_Lakehouse",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "Load_to_Synapse",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "url": {
+            "value": "@pipeline().parameters.fabricApiUrl",
+            "type": "Expression"
+          },
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json",
+            "Authorization": {
+              "value": "@pipeline().parameters.fabricAuthToken",
+              "type": "Expression"
+            }
+          },
+          "body": {
+            "value": "@concat('{\"action\": \"refresh\", \"lakehouse\": \"', pipeline().parameters.fabricLakehouseName, '\"}')",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "Send_Notification",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "Update_Fabric_Lakehouse",
+            "dependencyConditions": [
+              "Succeeded",
+              "Failed"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "url": {
+            "value": "@pipeline().parameters.notificationWebhook",
+            "type": "Expression"
+          },
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "value": "@concat('{\"text\": \"Brazilian E-Commerce ETL Pipeline ', activity('Update_Fabric_Lakehouse').status, ' at ', utcnow(), '\"}')",
+            "type": "Expression"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "storageAccountName": {
+        "type": "String",
+        "defaultValue": "stbrazilianecommerce"
+      },
+      "containerName": {
+        "type": "String",
+        "defaultValue": "brazilian-ecommerce-raw"
+      },
+      "rawDataPath": {
+        "type": "String",
+        "defaultValue": "raw"
+      },
+      "bronzeDataPath": {
+        "type": "String",
+        "defaultValue": "bronze"
+      },
+      "silverDataPath": {
+        "type": "String",
+        "defaultValue": "silver"
+      },
+      "goldDataPath": {
+        "type": "String",
+        "defaultValue": "gold"
+      },
+      "fabricApiUrl": {
+        "type": "String",
+        "defaultValue": "https://api.fabric.microsoft.com/v1/workspaces"
+      },
+      "fabricAuthToken": {
+        "type": "SecureString"
+      },
+      "fabricLakehouseName": {
+        "type": "String",
+        "defaultValue": "BrazilianEcommerceLakehouse"
+      },
+      "notificationWebhook": {
+        "type": "SecureString"
+      }
+    },
+    "variables": {
+      "pipelineStartTime": {
+        "type": "String",
+        "defaultValue": "@utcnow()"
+      },
+      "runId": {
+        "type": "String",
+        "defaultValue": "@pipeline().RunId"
+      }
+    },
+    "annotations": [],
+    "folder": {
+      "name": "Brazilian E-Commerce"
+    }
+  }
+}

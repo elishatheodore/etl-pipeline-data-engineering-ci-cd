@@ -1,0 +1,466 @@
+# =================================================================
+# GitHub Actions Workflow - Cloud-Agnostic ETL Pipeline
+# Multi-cloud CI/CD Pipeline with Terraform
+# =================================================================
+
+name: Cloud-Agnostic ETL Pipeline CI/CD
+
+on:
+  push:
+    branches: [ main, develop, release/* ]
+    paths:
+      - 'cloud_agnostic_data_etl_pipeline/**'
+      - 'requirements.txt'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'cloud_agnostic_data_etl_pipeline/**'
+      - 'requirements.txt'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+      cloud_provider:
+        description: 'Cloud provider'
+        required: true
+        default: 'azure'
+        type: choice
+        options:
+        - azure
+        - aws
+        - gcp
+
+env:
+  PYTHON_VERSION: '3.9'
+  WORKING_DIRECTORY: 'cloud_agnostic_data_etl_pipeline'
+
+jobs:
+  # =================================================================
+  # Code Quality and Testing
+  # =================================================================
+  test:
+    name: Code Quality and Testing
+    runs-on: ubuntu-latest
+    outputs:
+      test-results: ${{ steps.test.outputs.results }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov black flake8 mypy safety bandit
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    - name: Code formatting check (Black)
+      run: black --check --diff .
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    - name: Lint code (Flake8)
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    - name: Type checking (MyPy)
+      run: mypy . --ignore-missing-imports
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    - name: Security check (Bandit)
+      run: bandit -r . -f json -o bandit-report.json
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+      continue-on-error: true
+    
+    - name: Dependency security check (Safety)
+      run: safety check --json --output safety-report.json
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+      continue-on-error: true
+    
+    - name: Run unit tests
+      run: |
+        pytest tests/ --cov=. --cov-report=xml --cov-report=html --junitxml=test-results.xml
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ github.run_number }}
+        path: |
+          ${{ env.WORKING_DIRECTORY }}/test-results.xml
+          ${{ env.WORKING_DIRECTORY }}/coverage.xml
+          ${{ env.WORKING_DIRECTORY }}/bandit-report.json
+          ${{ env.WORKING_DIRECTORY }}/safety-report.json
+    
+    - name: Publish coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ${{ env.WORKING_DIRECTORY }}/coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  # =================================================================
+  # Terraform Validation
+  # =================================================================
+  terraform-validate:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+    needs: test
+    
+    strategy:
+      matrix:
+        cloud_provider: [azure, aws, gcp]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: '1.5.0'
+    
+    - name: Terraform Format Check
+      run: terraform fmt -check -recursive
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+    
+    - name: Terraform Init
+      run: terraform init -backend=false
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+    
+    - name: Terraform Validate
+      run: terraform validate -no-color
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+    
+    - name: Terraform Plan
+      run: terraform plan -var cloud_provider=${{ matrix.cloud_provider }} -var environment=dev -no-color -out=tfplan
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        TF_VAR_aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        TF_VAR_aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_databricks_host: ${{ secrets.DATABRICKS_HOST }}
+        TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+
+  # =================================================================
+  # Build and Package
+  # =================================================================
+  build:
+    name: Build and Package
+    runs-on: ubuntu-latest
+    needs: [test, terraform-validate]
+    if: github.event_name == 'push'
+    
+    outputs:
+      package-version: ${{ steps.version.outputs.version }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Generate version
+      id: version
+      run: echo "version=$(date +%Y.%m.%d).${{ github.run_number }}" >> $GITHUB_OUTPUT
+    
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build wheel
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    - name: Build package
+      run: python -m build
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: etl-pipeline-package-${{ steps.version.outputs.version }}
+        path: |
+          ${{ env.WORKING_DIRECTORY }}/dist/*.whl
+          ${{ env.WORKING_DIRECTORY }}/dist/*.tar.gz
+
+  # =================================================================
+  # Deploy to Development
+  # =================================================================
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    environment: 
+      name: development
+      url: ${{ steps.deploy.outputs.url }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+    
+    - name: Terraform Init
+      run: terraform init
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        TF_VAR_aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        TF_VAR_aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_databricks_host: ${{ secrets.DATABRICKS_HOST }}
+        TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+    
+    - name: Terraform Apply
+      id: deploy
+      run: terraform apply -auto-approve -var cloud_provider=azure -var environment=dev
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        TF_VAR_aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        TF_VAR_aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_databricks_host: ${{ secrets.DATABRICKS_HOST }}
+        TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+    
+    - name: Run data ingestion
+      run: |
+        export CLOUD_PROVIDER=azure
+        export AZURE_STORAGE_ACCOUNT_NAME=$(echo '${{ steps.deploy.outputs.storage_info }}' | jq -r '.azure.storage_account_name')
+        export CONTAINER_NAME=brazilian-ecommerce
+        python data/download_kaggle_data.py
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+  # =================================================================
+  # Deploy to Staging
+  # =================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/heads/release/')
+    environment: 
+      name: staging
+      url: ${{ steps.deploy.outputs.url }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+    
+    - name: Terraform Init
+      run: terraform init
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        TF_VAR_aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        TF_VAR_aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_databricks_host: ${{ secrets.DATABRICKS_HOST }}
+        TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+    
+    - name: Terraform Apply
+      id: deploy
+      run: terraform apply -auto-approve -var cloud_provider=azure -var environment=staging
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        TF_VAR_aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        TF_VAR_aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_databricks_host: ${{ secrets.DATABRICKS_HOST }}
+        TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+    
+    - name: Run integration tests
+      run: |
+        export CLOUD_PROVIDER=azure
+        export AZURE_STORAGE_ACCOUNT_NAME=$(echo '${{ steps.deploy.outputs.storage_info }}' | jq -r '.azure.storage_account_name')
+        export CONTAINER_NAME=brazilian-ecommerce-staging
+        python -m pytest tests/integration/ --junitxml=integration-test-results.xml
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+
+  # =================================================================
+  # Deploy to Production
+  # =================================================================
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment: 
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+    
+    - name: Terraform Init
+      run: terraform init
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        TF_VAR_aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        TF_VAR_aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_databricks_host: ${{ secrets.DATABRICKS_HOST }}
+        TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+    
+    - name: Terraform Apply
+      id: deploy
+      run: terraform apply -auto-approve -var cloud_provider=azure -var environment=prod
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        TF_VAR_aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        TF_VAR_aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_databricks_host: ${{ secrets.DATABRICKS_HOST }}
+        TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+    
+    - name: Run smoke tests
+      run: |
+        export CLOUD_PROVIDER=azure
+        export AZURE_STORAGE_ACCOUNT_NAME=$(echo '${{ steps.deploy.outputs.storage_info }}' | jq -r '.azure.storage_account_name')
+        export CONTAINER_NAME=brazilian-ecommerce-prod
+        python -m pytest tests/smoke/ --junitxml=smoke-test-results.xml
+      working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    - name: Send deployment notification
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#data-engineering'
+        text: |
+          🚀 Production Deployment Status: ${{ job.status }}
+          📦 Version: ${{ needs.build.outputs.package-version }}
+          🔗 Commit: ${{ github.sha }}
+          👤 User: ${{ github.actor }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # =================================================================
+  # Setup Monitoring
+  # =================================================================
+  setup-monitoring:
+    name: Setup Monitoring
+    runs-on: ubuntu-latest
+    needs: deploy-prod
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Setup monitoring
+      run: |
+        echo "Setting up production monitoring..."
+        # Add monitoring setup logic here
+        # This could include:
+        # - Creating CloudWatch alarms (AWS)
+        # - Setting up Azure Monitor alerts (Azure)
+        # - Configuring Stackdriver alerts (GCP)
+        # - Setting up Grafana dashboards
+        echo "Monitoring setup completed"
+
+# =================================================================
+# Workflow for Manual Deployment
+# =================================================================
+
+jobs:
+  manual-deploy:
+    name: Manual Deployment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+    
+    - name: Terraform Init
+      run: terraform init
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+    
+    - name: Terraform Apply
+      run: terraform apply -auto-approve -var cloud_provider=${{ github.event.inputs.cloud_provider }} -var environment=${{ github.event.inputs.environment }}
+      working-directory: ${{ env.WORKING_DIRECTORY }}/orchestration/terraform
+      env:
+        TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+        TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+        TF_VAR_azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        TF_VAR_aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        TF_VAR_aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_databricks_host: ${{ secrets.DATABRICKS_HOST }}
+        TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}

@@ -1,0 +1,339 @@
+# =================================================================
+# Azure DevOps Pipeline - Brazilian E-Commerce ETL Pipeline
+# Azure-Specific CI/CD Pipeline
+# =================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - release/*
+  paths:
+    include:
+      - azure_data_etl_pipeline/*
+      - requirements.txt
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  - group: etl-pipeline-variables
+  - name: pythonVersion
+    value: '3.9'
+  - name: workingDirectory
+    value: 'azure_data_etl_pipeline'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+- stage: Validate
+  displayName: 'Validate and Test'
+  jobs:
+  - job: ValidateCode
+    displayName: 'Validate Code Quality'
+    steps:
+    - checkout: self
+    
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(pythonVersion)'
+      displayName: 'Use Python $(pythonVersion)'
+    
+    - script: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov black flake8 mypy
+      displayName: 'Install Dependencies'
+    
+    - script: |
+        black --check --diff .
+      displayName: 'Code Formatting Check (Black)'
+    
+    - script: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      displayName: 'Lint Code (Flake8)'
+    
+    - script: |
+        mypy azure_data_etl_pipeline --ignore-missing-imports
+      displayName: 'Type Checking (MyPy)'
+    
+    - script: |
+        pytest azure_data_etl_pipeline/tests/ --cov=azure_data_etl_pipeline --cov-report=xml --cov-report=html
+      displayName: 'Run Unit Tests'
+    
+    - task: PublishCodeCoverageResults@1
+      inputs:
+        codeCoverageTool: Cobertura
+        summaryFileLocation: '$(workingDirectory)/coverage.xml'
+      displayName: 'Publish Code Coverage'
+
+- stage: Build
+  displayName: 'Build and Package'
+  dependsOn: Validate
+  condition: succeeded()
+  jobs:
+  - job: BuildArtifacts
+    displayName: 'Build Deployment Artifacts'
+    steps:
+    - checkout: self
+    
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(pythonVersion)'
+      displayName: 'Use Python $(pythonVersion)'
+    
+    - script: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      displayName: 'Install Dependencies'
+    
+    - task: ArchiveFiles@2
+      inputs:
+        rootFolderOrFile: '$(workingDirectory)'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/etl-pipeline-$(Build.BuildId).zip'
+        replaceExistingArchive: true
+      displayName: 'Archive Source Code'
+    
+    - publish: '$(Build.ArtifactStagingDirectory)/etl-pipeline-$(Build.BuildId).zip'
+      artifact: 'etl-pipeline-source'
+      displayName: 'Publish Source Code Artifact'
+
+- stage: Deploy_Dev
+  displayName: 'Deploy to Development'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+  jobs:
+  - deployment: DeployDev
+    displayName: 'Deploy to Dev Environment'
+    environment: 'Development'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: etl-pipeline-source
+          
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Deploying to Development environment"
+                
+                # Extract artifacts
+                unzip $(Pipeline.Workspace)/etl-pipeline-source/etl-pipeline-$(Build.BuildId).zip -d $(Agent.TempDirectory)/etl-pipeline
+                
+                # Set environment variables
+                export ENVIRONMENT=dev
+                export AZURE_STORAGE_ACCOUNT_NAME=$(devStorageAccount)
+                export AZURE_CONTAINER_NAME=$(devContainerName)
+                export DATABRICKS_HOST=$(devDatabricksHost)
+                export DATABRICKS_TOKEN=$(devDatabricksToken)
+                
+                # Run data ingestion
+                cd $(Agent.TempDirectory)/etl-pipeline
+                python data/download_kaggle_data.py
+                
+                echo "Development deployment completed successfully"
+            displayName: 'Deploy to Development'
+
+- stage: Deploy_Staging
+  displayName: 'Deploy to Staging'
+  dependsOn: Build
+  condition: and(succeeded(), or(contains(variables['Build.SourceBranch'], 'refs/heads/release/'), eq(variables['Build.Reason'], 'Manual')))
+  jobs:
+  - deployment: DeployStaging
+    displayName: 'Deploy to Staging Environment'
+    environment: 'Staging'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: etl-pipeline-source
+          
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Deploying to Staging environment"
+                
+                # Extract artifacts
+                unzip $(Pipeline.Workspace)/etl-pipeline-source/etl-pipeline-$(Build.BuildId).zip -d $(Agent.TempDirectory)/etl-pipeline
+                
+                # Set environment variables
+                export ENVIRONMENT=staging
+                export AZURE_STORAGE_ACCOUNT_NAME=$(stagingStorageAccount)
+                export AZURE_CONTAINER_NAME=$(stagingContainerName)
+                export DATABRICKS_HOST=$(stagingDatabricksHost)
+                export DATABRICKS_TOKEN=$(stagingDatabricksToken)
+                
+                # Run data ingestion
+                cd $(Agent.TempDirectory)/etl-pipeline
+                python data/download_kaggle_data.py
+                
+                # Deploy Databricks notebooks
+                echo "Deploying Databricks notebooks..."
+                # Add Databricks deployment logic here
+                
+                echo "Staging deployment completed successfully"
+            displayName: 'Deploy to Staging'
+          
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Running integration tests in Staging"
+                
+                # Run integration tests
+                cd $(Agent.TempDirectory)/etl-pipeline
+                python -m pytest tests/integration/ --junitxml=test-results.xml
+                
+                echo "Integration tests completed"
+            displayName: 'Run Integration Tests'
+
+- stage: Deploy_Prod
+  displayName: 'Deploy to Production'
+  dependsOn: Deploy_Staging
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployProd
+    displayName: 'Deploy to Production Environment'
+    environment: 'Production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: etl-pipeline-source
+          
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Deploying to Production environment"
+                
+                # Extract artifacts
+                unzip $(Pipeline.Workspace)/etl-pipeline-source/etl-pipeline-$(Build.BuildId).zip -d $(Agent.TempDirectory)/etl-pipeline
+                
+                # Set environment variables
+                export ENVIRONMENT=prod
+                export AZURE_STORAGE_ACCOUNT_NAME=$(prodStorageAccount)
+                export AZURE_CONTAINER_NAME=$(prodContainerName)
+                export DATABRICKS_HOST=$(prodDatabricksHost)
+                export DATABRICKS_TOKEN=$(prodDatabricksToken)
+                
+                # Deploy with approval
+                echo "Production deployment approved"
+                
+                # Deploy Azure Data Factory pipeline
+                echo "Deploying Azure Data Factory pipeline..."
+                az datafactory pipeline create --resource-group $(prodResourceGroup) --factory-name $(prodDataFactoryName) --name Brazilian_Ecommerce_ETL_Pipeline --pipeline-file adf/pipeline_brazilian_ecommerce.json
+                
+                # Deploy Databricks notebooks
+                echo "Deploying Databricks notebooks..."
+                # Add Databricks deployment logic here
+                
+                # Deploy Synapse objects
+                echo "Deploying Synapse objects..."
+                # Add Synapse deployment logic here
+                
+                # Deploy Fabric lakehouse
+                echo "Deploying Fabric lakehouse..."
+                # Add Fabric deployment logic here
+                
+                echo "Production deployment completed successfully"
+            displayName: 'Deploy to Production'
+          
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Running smoke tests in Production"
+                
+                # Run smoke tests
+                cd $(Agent.TempDirectory)/etl-pipeline
+                python -m pytest tests/smoke/ --junitxml=smoke-test-results.xml
+                
+                echo "Smoke tests completed"
+            displayName: 'Run Smoke Tests'
+
+- stage: Monitor
+  displayName: 'Setup Monitoring'
+  dependsOn: Deploy_Prod
+  condition: succeeded()
+  jobs:
+  - job: SetupMonitoring
+    displayName: 'Setup Production Monitoring'
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Setting up production monitoring"
+          
+          # Create Azure Monitor alerts
+          az monitor metrics alert create \
+            --name "ETL Pipeline Failure Alert" \
+            --resource-group $(prodResourceGroup) \
+            --scopes "/subscriptions/$(subscriptionId)/resourceGroups/$(prodResourceGroup)/providers/Microsoft.DataFactory/factories/$(prodDataFactoryName)" \
+            --condition "avg PercentageFailedRuns > 5" \
+            --window-size 5m \
+            --evaluation-frequency 1m \
+            --severity 2 \
+            --action-group $(alertActionGroup)
+          
+          # Create Log Analytics query alert
+          az monitor scheduled-query create \
+            --name "Data Quality Issues Alert" \
+            --resource-group $(prodResourceGroup) \
+            --workspace $(prodLogAnalyticsWorkspace) \
+            --datasource "logs" \
+            --query "AzureDiagnostics | where Category == 'PipelineRuns' | where Status_s == 'Failed' | count" \
+            --condition "count > 0" \
+            --frequency 5 \
+            --time-window 5 \
+            --severity 3 \
+            --action-group $(alertActionGroup)
+          
+          echo "Monitoring setup completed"
+      displayName: 'Setup Azure Monitor Alerts'
+
+# =================================================================
+# Template for Databricks Deployment
+# =================================================================
+
+- template: templates/databricks-deployment.yml
+  parameters:
+    environment: 'Production'
+    databricksHost: '$(prodDatabricksHost)'
+    databricksToken: '$(prodDatabricksToken)'
+
+# =================================================================
+# Template for ADF Deployment
+# =================================================================
+
+- template: templates/adf-deployment.yml
+  parameters:
+    environment: 'Production'
+    resourceGroup: '$(prodResourceGroup)'
+    dataFactoryName: '$(prodDataFactoryName)'
