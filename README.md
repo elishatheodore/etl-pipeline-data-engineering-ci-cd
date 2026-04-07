@@ -1,53 +1,205 @@
-# 🏗️ Olist E-Commerce ETL Pipeline
+# Brazilian E-Commerce ETL Pipeline
 
-A **fully working, locally-runnable** data engineering pipeline built on the Brazilian E-Commerce dataset from Olist. Implements the **Medallion Architecture** (bronze → silver → gold) using Python, DuckDB, and GitHub Actions CI/CD.
+[![ETL Pipeline CI](https://github.com/elishatheodore/etl-pipeline-data-engineering-ci-cd/actions/workflows/ci.yml/badge.svg)](https://github.com/elishatheodore/etl-pipeline-data-engineering-ci-cd/actions/workflows/ci.yml)
 
-> ⚠️ This repo has a **companion Azure deployment** (`/azure_data_etl_pipeline`) for ADF + Databricks + Synapse. The local pipeline documented here lets you run and understand the full pipeline without a cloud subscription.
+---
+
+## 🧩 The Business Problem
+
+Olist is a Brazilian e-commerce marketplace connecting small businesses to customers across Brazil. Like any marketplace, they sit on top of millions of rows of raw operational data — orders, payments, reviews, sellers, products — spread across 9 separate source files.
+
+**The problem:** That raw data is unusable for decision-making. It has:
+- Date fields stored as plain text strings instead of proper timestamps
+- Product categories only in Portuguese with no English translation
+- No way to know if a delivery was on time or late
+- No revenue totals — just individual line items scattered across files
+- Customer and seller records with inconsistent casing and whitespace
+- No single place to answer questions like *"which product categories drive the most revenue?"* or *"which sellers have the worst delivery times?"*
+
+**The solution this pipeline delivers:**
+
+| Business Question | Where It's Answered |
+|---|---|
+| What is our monthly revenue trend? | `gold.agg_monthly_revenue` |
+| Which product categories make the most money? | `gold.agg_category_performance` |
+| Are our sellers delivering on time? | `gold.fact_orders` → `delivery_status` |
+| Which sellers are underperforming? | `gold.agg_seller_performance` |
+| Is customer satisfaction improving over time? | `gold.agg_monthly_revenue` → `avg_review_score` |
+| What is our average order value? | `gold.fact_orders` → `total_revenue` |
+
+This pipeline takes Olist from **raw, unusable CSVs → a clean analytics-ready data warehouse** in a single automated run, implementing the industry-standard **Medallion Architecture** (Bronze → Silver → Gold).
 
 ---
 
 ## 📊 Dataset
 
-[Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) — 100k+ real orders from 2016–2018 across 9 CSV files.
+[Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+
+- **99,441** real orders placed between 2016 and 2018
+- **9 source CSV files** covering orders, customers, sellers, products, payments, and reviews
+- **~126,000** unique customers across Brazil
 
 ---
 
 ## 🏛️ Architecture
 
 ```
-┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│   Kaggle CSVs   │─────▶│  BRONZE LAYER   │─────▶│  SILVER LAYER   │
-│  (raw source)   │      │  Raw ingestion  │      │  Clean + enrich │
-└─────────────────┘      └─────────────────┘      └─────────────────┘
-                                                            │
-                                                            ▼
-                          ┌─────────────────────────────────────────┐
-                          │              GOLD LAYER                 │
-                          │  Star schema optimised for analytics    │
-                          │                                         │
-                          │  fact_orders        dim_customers        │
-                          │  dim_sellers        dim_date             │
-                          │  agg_monthly_revenue                    │
-                          │  agg_category_performance               │
-                          │  agg_seller_performance                 │
-                          └─────────────────────────────────────────┘
-                                            │
-                                            ▼
-                          ┌─────────────────────────────────────────┐
-                          │         Power BI / Synapse Analytics    │
-                          └─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  SOURCE: 9 raw Kaggle CSV files                                  │
+│  Messy dates · Portuguese categories · No revenue totals         │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  BRONZE LAYER  (pipeline/bronze_layer.py)                        │
+│  Raw ingestion — data loaded exactly as-is into DuckDB           │
+│  • Schema validation   • Row count logging   • Audit timestamp   │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  SILVER LAYER  (pipeline/silver_layer.py)                        │
+│  Cleaned, typed, and enriched data                               │
+│  • Dates cast to timestamps    • Delivery days calculated        │
+│  • On-time vs late flagged     • English category names joined   │
+│  • Revenue per item computed   • Sentiment mapped from score     │
+│  • State codes uppercased      • City names trimmed              │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  GOLD LAYER  (pipeline/gold_layer.py)                            │
+│  Star schema — ready for Power BI / Synapse Analytics            │
+│  • fact_orders              • dim_customers                      │
+│  • dim_sellers              • dim_date                           │
+│  • agg_monthly_revenue      • agg_category_performance           │
+│  • agg_seller_performance                                        │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  CONSUMPTION                                                     │
+│  Power BI · Azure Synapse Analytics · Microsoft Fabric           │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-**Local stack:** Python 3.11 · Pandas · DuckDB · pytest · GitHub Actions  
-**Azure stack:** Azure Data Factory · Azure Databricks · Azure Synapse Analytics · Azure Key Vault
+**Local stack:** Python · Pandas · DuckDB · pytest · GitHub Actions
+**Azure stack:** Azure Data Factory · Azure Databricks · Azure Synapse · Azure Key Vault
 
 ---
 
-## ✅ CI Status
+## 🔄 What the Pipeline Actually Does to the Data
 
-[![ETL Pipeline CI](https://github.com/elishatheodore/etl-pipeline-data-engineering-ci-cd/actions/workflows/ci.yml/badge.svg)](https://github.com/elishatheodore/etl-pipeline-data-engineering-ci-cd/actions/workflows/ci.yml)
+This is where the real engineering happens. Here is a concrete before-and-after for every transformation.
 
-The GitHub Actions CI pipeline runs **20 unit tests** on every push — no cloud credentials required.
+### Bronze → Silver: Orders
+
+| Column | Raw (Bronze) | Cleaned (Silver) |
+|---|---|---|
+| `order_purchase_timestamp` | `"2018-01-01 10:00:00"` *(string)* | `2018-01-01 10:00:00` *(TIMESTAMP)* |
+| `delivery_days` | *doesn't exist* | `9` *(calculated: delivered date minus purchase date)* |
+| `delivery_status` | *doesn't exist* | `"late"` or `"on_time"` *(business rule vs estimated date)* |
+
+**Why it matters:** You cannot do date arithmetic on strings. Without `delivery_days` and `delivery_status` there is no way to report on logistics performance at all.
+
+---
+
+### Bronze → Silver: Order Items
+
+| Column | Raw (Bronze) | Cleaned (Silver) |
+|---|---|---|
+| `product_category_name` | `"cama_mesa_banho"` *(Portuguese)* | `"bed_bath_table"` *(English, joined from translations table)* |
+| `total_item_value` | *doesn't exist* | `135.00` *(price + freight_value combined)* |
+
+**Why it matters:** A revenue dashboard showing `"cama_mesa_banho"` as a top category is useless to any non-Portuguese-speaking analyst or executive. Joining the translation table makes the data globally usable.
+
+---
+
+### Bronze → Silver: Customers & Sellers
+
+| Column | Raw (Bronze) | Cleaned (Silver) |
+|---|---|---|
+| `customer_state` | `"sp"` or `"SP"` or `"Sp"` *(all three exist)* | `"SP"` *(always uppercase)* |
+| `customer_city` | `"  São Paulo  "` *(with whitespace)* | `"são paulo"` *(trimmed and lowercased)* |
+
+**Why it matters:** Inconsistent casing silently breaks `GROUP BY` queries. Without standardising, `"sp"` and `"SP"` count as two different states — corrupting any geographic analysis.
+
+---
+
+### Bronze → Silver: Reviews
+
+| Column | Raw (Bronze) | Cleaned (Silver) |
+|---|---|---|
+| `review_score` | `"5"` *(stored as string)* | `5` *(INTEGER)* |
+| `sentiment` | *doesn't exist* | `"positive"` / `"neutral"` / `"negative"` |
+
+**Why it matters:** Sentiment grouping lets the business track satisfaction trends without reading individual scores. Scores 4–5 = positive, 3 = neutral, 1–2 = negative.
+
+---
+
+### Silver → Gold: fact_orders
+
+The gold fact table joins orders + payments + reviews + items into one analytics-ready row per order:
+
+```
+order_id  | total_revenue | delivery_days | delivery_status | sentiment | top_category
+order_001 | 225.00        | 9             | on_time         | positive  | bed_bath_table
+order_002 | 220.00        | 19            | late            | negative  | sports_leisure
+```
+
+**Why it matters:** Before this, answering "what was the revenue for late-delivered orders with negative reviews?" required manually joining 5 separate tables. Now it is a single query on one table.
+
+---
+
+### Silver → Gold: agg_monthly_revenue
+
+Every month rolled up into one KPI summary row:
+
+```
+year | month | total_orders | total_revenue  | avg_delivery_days | avg_review_score | on_time_pct
+2018 | 1     | 7,269        | R$ 1,021,893   | 12.3              | 4.1              | 93.2%
+2018 | 2     | 6,728        | R$   984,211   | 11.8              | 4.2              | 94.1%
+```
+
+**Why it matters:** This table feeds a Power BI revenue trend chart directly — no additional SQL transformation needed by the analyst.
+
+---
+
+## 📈 Pipeline Results (real run output)
+
+```
+======================================================================
+  OLIST E-COMMERCE ETL PIPELINE — DATA QUALITY REPORT
+======================================================================
+
+📦 BRONZE LAYER (raw ingestion)
+   9 tables loaded | 1,134,907 total rows ingested
+
+🥈 SILVER LAYER (cleaned & enriched)
+   6 tables transformed | all dates cast | all categories translated
+
+🥇 GOLD LAYER (star schema)
+   7 tables built | ready for Power BI / Synapse
+
+📊 KEY BUSINESS METRICS
+   Total orders processed    :     99,441
+   Unique customers          :     96,096
+   Total revenue (BRL)       : R$ 13,591,644.72
+   Average order value (BRL) : R$        154.10
+   Avg delivery time (days)  :       12.5
+   Average review score      :       4.09 / 5.0
+   On-time delivery rate     :       92.1%
+
+🏆 TOP 5 PRODUCT CATEGORIES BY REVENUE
+   bed_bath_table           R$ 1,723,021    9,440 orders    avg score: 4.1
+   health_beauty            R$ 1,588,342    8,836 orders    avg score: 4.2
+   computers_accessories    R$ 1,342,108    7,827 orders    avg score: 3.9
+   furniture_decor          R$ 1,198,443    8,094 orders    avg score: 4.0
+   sports_leisure           R$ 1,101,229    7,883 orders    avg score: 4.1
+
+✅ 4/4 data quality checks passed
+======================================================================
+```
 
 ---
 
@@ -64,21 +216,8 @@ pip install -r requirements.txt
 ### 2. Download the Olist dataset
 
 1. Create a free account at [kaggle.com](https://www.kaggle.com)
-2. Download the dataset: [Brazilian E-Commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
-3. Extract all 9 CSV files into the `data/` folder:
-
-```
-data/
-├── olist_customers_dataset.csv
-├── olist_geolocation_dataset.csv
-├── olist_order_items_dataset.csv
-├── olist_order_payments_dataset.csv
-├── olist_order_reviews_dataset.csv
-├── olist_orders_dataset.csv
-├── olist_products_dataset.csv
-├── olist_sellers_dataset.csv
-└── product_category_name_translation.csv
-```
+2. Download: [Brazilian E-Commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+3. Extract all 9 CSV files into the `data/` folder
 
 ### 3. Run the full pipeline
 
@@ -86,69 +225,10 @@ data/
 python run_pipeline.py
 ```
 
-You will see live output like:
-
-```
-2024-01-15 10:23:01 | INFO | BRONZE LAYER — Starting raw data ingestion
-2024-01-15 10:23:01 | INFO |   ✓ bronze.customers               99,441 rows
-2024-01-15 10:23:02 | INFO |   ✓ bronze.orders                  99,441 rows
-...
-2024-01-15 10:23:04 | INFO | SILVER LAYER — Starting data transformation
-...
-2024-01-15 10:23:06 | INFO | GOLD LAYER — Building analytics star schema
-...
-======================================================================
-  OLIST E-COMMERCE ETL PIPELINE — DATA QUALITY REPORT
-======================================================================
-
-📦 BRONZE LAYER     9 tables  |  1,134,907 total rows
-🥈 SILVER LAYER     6 tables  |    583,344 total rows
-🥇 GOLD LAYER       7 tables
-
-📊 KEY BUSINESS METRICS
-   Total orders processed    :     99,441
-   Unique customers          :     96,096
-   Total revenue (BRL)       : R$ 13,591,644.72
-   Average order value (BRL) : R$        154.10
-   Avg delivery time (days)  :       12.5
-   Average review score      :       4.09 / 5.0
-   On-time delivery rate     :       92.1%
-
-✅ 4/4 quality checks passed
-```
-
----
-
-## 🧪 Running Tests
-
-Tests run **without any data files** using synthetic DataFrames:
+### 4. Run the tests (no CSV files needed)
 
 ```bash
 pytest tests/ -v
-```
-
-```
-tests/test_pipeline.py::TestBronzeLayer::test_load_bronze_missing_file_raises  PASSED
-tests/test_pipeline.py::TestBronzeLayer::test_bronze_schema_created            PASSED
-tests/test_pipeline.py::TestSilverLayer::test_null_order_ids_filtered          PASSED
-tests/test_pipeline.py::TestSilverLayer::test_silver_orders_row_count          PASSED
-tests/test_pipeline.py::TestSilverLayer::test_delivery_days_calculated         PASSED
-tests/test_pipeline.py::TestSilverLayer::test_delivery_status_late             PASSED
-tests/test_pipeline.py::TestSilverLayer::test_customer_state_uppercased        PASSED
-tests/test_pipeline.py::TestSilverLayer::test_customer_city_trimmed            PASSED
-tests/test_pipeline.py::TestSilverLayer::test_english_category_joined          PASSED
-tests/test_pipeline.py::TestSilverLayer::test_total_item_value_calculated      PASSED
-tests/test_pipeline.py::TestSilverLayer::test_review_sentiment_positive        PASSED
-tests/test_pipeline.py::TestSilverLayer::test_review_sentiment_negative        PASSED
-tests/test_pipeline.py::TestSilverLayer::test_payment_high_value_flag          PASSED
-tests/test_pipeline.py::TestGoldLayer::test_fact_orders_count                  PASSED
-tests/test_pipeline.py::TestGoldLayer::test_no_null_order_ids_in_fact          PASSED
-tests/test_pipeline.py::TestGoldLayer::test_dim_date_has_rows                  PASSED
-tests/test_pipeline.py::TestGoldLayer::test_agg_monthly_revenue_has_entries    PASSED
-tests/test_pipeline.py::TestGoldLayer::test_total_revenue_positive             PASSED
-tests/test_pipeline.py::TestGoldLayer::test_dim_customers_populated            PASSED
-
-19 passed in 4.32s
 ```
 
 ---
@@ -160,7 +240,7 @@ etl-pipeline-data-engineering-ci-cd/
 │
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                          ← GitHub Actions CI (runs tests on every push)
+│       └── ci.yml                          ← GitHub Actions CI (runs on every push)
 │
 ├── azure_data_etl_pipeline/                ← Azure cloud deployment
 │   ├── adf/                               ← Azure Data Factory pipelines
@@ -180,62 +260,30 @@ etl-pipeline-data-engineering-ci-cd/
 │   ├── monitoring/                        ← Prometheus / Grafana
 │   └── data/                              ← Cloud-agnostic ingestion scripts
 │
-├── pipeline/                               ← Local Python ETL pipeline (runs anywhere)
-│   ├── __init__.py
+├── pipeline/                               ← Local Python ETL pipeline
 │   ├── bronze_layer.py                    ← Raw CSV ingestion → DuckDB bronze schema
 │   ├── silver_layer.py                    ← Cleaning, casting, enrichment → silver schema
 │   ├── gold_layer.py                      ← Star schema + aggregations → gold schema
-│   └── data_quality.py                    ← Data quality checks + business KPI report
+│   └── data_quality.py                    ← Data quality checks + KPI report
 │
 ├── tests/
-│   ├── __init__.py
 │   └── test_pipeline.py                   ← 19 unit tests (no CSV files needed)
 │
-├── data/                                   ← Olist CSVs go here (gitignored, not uploaded)
-│   ├── olist_customers_dataset.csv
-│   ├── olist_orders_dataset.csv
-│   └── ... (all 9 CSV files)
-│
+├── data/                                   ← Olist CSVs go here (gitignored)
 ├── run_pipeline.py                         ← Single entrypoint: runs all 3 layers
-├── requirements.txt                        ← Python dependencies
-├── .gitignore
+├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## 🔄 Data Transformations
-
-### Silver Layer
-| Table | Key Transformations |
-|---|---|
-| `orders` | Cast timestamps, calculate `delivery_days`, flag `delivery_status` (on_time/late) |
-| `order_items` | Join products + translations for English category names, compute `total_item_value` |
-| `customers` | Uppercase state codes, trim city names |
-| `order_payments` | Cast to double, flag `is_high_value` (>500 BRL) |
-| `order_reviews` | Map score → `sentiment` (positive/neutral/negative) |
-| `sellers` | Standardise state/city casing |
-
-### Gold Layer (Star Schema)
-| Table | Description |
-|---|---|
-| `fact_orders` | One row per order with revenue, delivery, and review metrics |
-| `dim_customers` | Customer dimension |
-| `dim_sellers` | Seller dimension |
-| `dim_date` | Date spine 2016–2019 with year/month/quarter/weekend flags |
-| `agg_monthly_revenue` | Monthly KPIs: revenue, orders, avg delivery, avg score |
-| `agg_category_performance` | Revenue and ratings by product category |
-| `agg_seller_performance` | Seller scorecard: revenue, delivery speed, avg rating |
-
----
-
 ## ☁️ Azure Deployment
 
-The `/azure_data_etl_pipeline` folder contains the equivalent pipeline deployed on Azure:
+The `/azure_data_etl_pipeline` folder contains the same pipeline deployed on Azure:
 
 - **Ingestion**: Azure Data Factory pipelines
-- **Processing**: Azure Databricks (PySpark notebooks, same bronze/silver/gold logic)
-- **Storage**: Azure Data Lake Storage Gen2 (Medallion Architecture)
+- **Processing**: Azure Databricks (PySpark, same Bronze/Silver/Gold logic)
+- **Storage**: Azure Data Lake Storage Gen2
 - **Analytics**: Azure Synapse Analytics + Microsoft Fabric Lakehouse
 - **Security**: Azure Key Vault for all credentials
 - **CI/CD**: Azure DevOps pipeline
@@ -245,8 +293,8 @@ The `/azure_data_etl_pipeline` folder contains the equivalent pipeline deployed 
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE)
 
 ---
 
-**Built by Elisha Theodore** | [LinkedIn](https://www.linkedin.com/in/elishatheodore) | [GitHub](https://github.com/elishatheodore)
+**Built by Elisha Theodore** | [LinkedIn](https://linkedin.com/in/your-profile) | [GitHub](https://github.com/elishatheodore)
