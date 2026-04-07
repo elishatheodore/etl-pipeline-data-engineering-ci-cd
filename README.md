@@ -156,18 +156,50 @@ tests/test_pipeline.py::TestGoldLayer::test_dim_customers_populated            P
 ## 📁 Project Structure
 
 ```
-├── pipeline/
-│   ├── bronze_layer.py      # Raw CSV ingestion → DuckDB bronze schema
-│   ├── silver_layer.py      # Cleaning, casting, enrichment → silver schema
-│   ├── gold_layer.py        # Star schema + aggregations → gold schema
-│   └── data_quality.py      # Data quality checks + business KPI report
+etl-pipeline-data-engineering-ci-cd/
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml                          ← GitHub Actions CI (runs tests on every push)
+│
+├── azure_data_etl_pipeline/                ← Azure cloud deployment
+│   ├── adf/                               ← Azure Data Factory pipelines
+│   ├── databricks/                        ← Databricks notebooks (Bronze/Silver/Gold)
+│   ├── synapse/                           ← Synapse Analytics SQL scripts
+│   ├── fabric/                            ← Microsoft Fabric Lakehouse setup
+│   ├── keyvault/                          ← Azure Key Vault configuration
+│   ├── cicd/                              ← Azure DevOps pipeline
+│   ├── monitoring/                        ← Azure Monitor setup
+│   └── data/                              ← Data ingestion scripts
+│
+├── cloud_agnostic_data_etl_pipeline/       ← Multi-cloud deployment (Azure/AWS/GCP)
+│   ├── orchestration/                     ← Airflow / Prefect / Terraform
+│   ├── databricks/                        ← Cloud-agnostic Spark notebooks
+│   ├── data_lake/                         ← Multi-cloud storage setup
+│   ├── cicd/                              ← GitHub Actions workflows
+│   ├── monitoring/                        ← Prometheus / Grafana
+│   └── data/                              ← Cloud-agnostic ingestion scripts
+│
+├── pipeline/                               ← Local Python ETL pipeline (runs anywhere)
+│   ├── __init__.py
+│   ├── bronze_layer.py                    ← Raw CSV ingestion → DuckDB bronze schema
+│   ├── silver_layer.py                    ← Cleaning, casting, enrichment → silver schema
+│   ├── gold_layer.py                      ← Star schema + aggregations → gold schema
+│   └── data_quality.py                    ← Data quality checks + business KPI report
+│
 ├── tests/
-│   └── test_pipeline.py     # 19 unit tests (no data files needed)
-├── azure_data_etl_pipeline/ # Azure ADF + Databricks + Synapse deployment
-├── data/                    # Place Olist CSVs here (gitignored)
-├── run_pipeline.py          # Main entrypoint — runs all 3 layers
-├── requirements.txt
-└── .github/workflows/ci.yml # GitHub Actions CI
+│   ├── __init__.py
+│   └── test_pipeline.py                   ← 19 unit tests (no CSV files needed)
+│
+├── data/                                   ← Olist CSVs go here (gitignored, not uploaded)
+│   ├── olist_customers_dataset.csv
+│   ├── olist_orders_dataset.csv
+│   └── ... (all 9 CSV files)
+│
+├── run_pipeline.py                         ← Single entrypoint: runs all 3 layers
+├── requirements.txt                        ← Python dependencies
+├── .gitignore
+└── README.md
 ```
 
 ---
