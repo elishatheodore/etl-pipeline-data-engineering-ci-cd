@@ -217,4 +217,4 @@ MIT License — see [LICENSE](LICENSE)
 
 ---
 
-**Built by Elisha Theodore** | [LinkedIn](https://linkedin.com/in/your-profile) | [GitHub](https://github.com/elishatheodore)
+**Built by Elisha Theodore** | [LinkedIn](https://www.linkedin.com/in/elishatheodore) | [GitHub](https://github.com/elishatheodore)
