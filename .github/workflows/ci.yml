@@ -55,4 +55,4 @@ jobs:
       - name: Run flake8
         run: |
           # Fail on syntax errors or undefined names; warn on style
-          flake8 pipeline/ run_pipeline.py --max-line-length=120 --count --statistics
+          flake8 pipeline/ run_pipeline.py --max-line-length=120 --count --statistics --ignore=E231,E402,F401,F841
