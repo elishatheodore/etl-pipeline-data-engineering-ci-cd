@@ -9,12 +9,10 @@ Author: Elisha Theodore
 Dataset: Brazilian E-Commerce (Olist) - https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 """
 
-import os
 import logging
 import duckdb
 import pandas as pd
 from pathlib import Path
-from datetime import datetime
 
 # --- Setup logging so we can see what's happening ---
 logging.basicConfig(
@@ -27,15 +25,15 @@ log = logging.getLogger(__name__)
 
 # --- File map: logical name → CSV filename ---
 OLIST_FILES = {
-    "customers":     "olist_customers_dataset.csv",
-    "geolocation":   "olist_geolocation_dataset.csv",
-    "order_items":   "olist_order_items_dataset.csv",
-    "order_payments":"olist_order_payments_dataset.csv",
+    "customers": "olist_customers_dataset.csv",
+    "geolocation": "olist_geolocation_dataset.csv",
+    "order_items": "olist_order_items_dataset.csv",
+    "order_payments": "olist_order_payments_dataset.csv",
     "order_reviews": "olist_order_reviews_dataset.csv",
-    "orders":        "olist_orders_dataset.csv",
-    "products":      "olist_products_dataset.csv",
-    "sellers":       "olist_sellers_dataset.csv",
-    "translations":  "product_category_name_translation.csv",
+    "orders": "olist_orders_dataset.csv",
+    "products": "olist_products_dataset.csv",
+    "sellers": "olist_sellers_dataset.csv",
+    "translations": "product_category_name_translation.csv",
 }
 
 
