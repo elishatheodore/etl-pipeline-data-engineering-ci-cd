@@ -4,11 +4,11 @@
 
 ---
 
-## 🧩 The Business Problem
+## The Business Problem
 
-Olist is a Brazilian e-commerce marketplace connecting small businesses to customers across Brazil. Like any marketplace, they sit on top of millions of rows of raw operational data — orders, payments, reviews, sellers, products — spread across 9 separate source files.
+Olist is a Brazilian e-commerce marketplace with millions of rows spread across 9 separate source files (orders, payments, reviews, sellers, products, etc.).
 
-**The problem:** That raw data is unusable for decision-making. It has:
+**The problem:** Raw data is unusable. It has:
 - Date fields stored as plain text strings instead of proper timestamps
 - Product categories only in Portuguese with no English translation
 - No way to know if a delivery was on time or late
@@ -31,60 +31,22 @@ This pipeline takes Olist from **raw, unusable CSVs → a clean analytics-ready 
 
 ---
 
-## 📊 Dataset
+## Dataset
 
-[Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+[Brazilian E-Commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
 
-- **99,441** real orders placed between 2016 and 2018
-- **9 source CSV files** covering orders, customers, sellers, products, payments, and reviews
-- **~126,000** unique customers across Brazil
+- 99,441 orders from 2016-2018
+- 9 CSV files (~126k unique customers)
+- Public on Kaggle
 
 ---
 
-## 🏛️ Architecture
+## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  SOURCE: 9 raw Kaggle CSV files                                  │
-│  Messy dates · Portuguese categories · No revenue totals         │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  BRONZE LAYER  (pipeline/bronze_layer.py)                        │
-│  Raw ingestion — data loaded exactly as-is into DuckDB           │
-│  • Schema validation   • Row count logging   • Audit timestamp   │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  SILVER LAYER  (pipeline/silver_layer.py)                        │
-│  Cleaned, typed, and enriched data                               │
-│  • Dates cast to timestamps    • Delivery days calculated        │
-│  • On-time vs late flagged     • English category names joined   │
-│  • Revenue per item computed   • Sentiment mapped from score     │
-│  • State codes uppercased      • City names trimmed              │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  GOLD LAYER  (pipeline/gold_layer.py)                            │
-│  Star schema — ready for Power BI / Synapse Analytics            │
-│  • fact_orders              • dim_customers                      │
-│  • dim_sellers              • dim_date                           │
-│  • agg_monthly_revenue      • agg_category_performance           │
-│  • agg_seller_performance                                        │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  CONSUMPTION                                                     │
-│  Power BI · Azure Synapse Analytics · Microsoft Fabric           │
-└──────────────────────────────────────────────────────────────────┘
-```
+The Medallion pattern: Bronze → Silver → Gold
 
-**Local stack:** Python · Pandas · DuckDB · pytest · GitHub Actions
-**Azure stack:** Azure Data Factory · Azure Databricks · Azure Synapse · Azure Key Vault
+**Local:** Python, Pandas, DuckDB, pytest, GitHub Actions
+**Azure:** Data Factory, Databricks, Synapse, Key Vault
 
 ---
 
@@ -126,9 +88,9 @@ This is where the real engineering happens. Here is a concrete before-and-after 
 
 ---
 
-### Bronze → Silver: Reviews
+###Transformations
 
-| Column | Raw (Bronze) | Cleaned (Silver) |
+What the pipeline actually does to the data:
 |---|---|---|
 | `review_score` | `"5"` *(stored as string)* | `5` *(INTEGER)* |
 | `sentiment` | *doesn't exist* | `"positive"` / `"neutral"` / `"negative"` |

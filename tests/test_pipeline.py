@@ -1,13 +1,6 @@
 """
-UNIT TESTS
-===========
-These tests run without the real Olist data.
-They use small synthetic DataFrames to verify the transformation logic.
-
-Run with:  pytest tests/ -v
-           pytest tests/ -v --cov=pipeline
-
-Author: Elisha Theodore
+Unit tests for the pipeline
+Run with: pytest tests/ -v
 """
 
 import pytest
@@ -20,23 +13,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-# -----------------------------------------------------------------------
-# FIXTURES  — reusable test setup
-# -----------------------------------------------------------------------
+# Test fixtures - minimal db setup for each test
 
 @pytest.fixture
 def tmp_db(tmp_path):
-    """Create a fresh in-memory-like DuckDB at a temp path for each test."""
+    """Temporary test database"""
     db_path = str(tmp_path / "test.duckdb")
     return db_path
 
 
 @pytest.fixture
 def populated_bronze_db(tmp_db):
-    """
-    Create a DuckDB with minimal bronze tables so silver/gold tests can run.
-    This simulates what bronze_layer.load_bronze() produces.
-    """
+    """Create test bronze tables"""
     con = duckdb.connect(tmp_db)
     con.execute("CREATE SCHEMA IF NOT EXISTS bronze")
 

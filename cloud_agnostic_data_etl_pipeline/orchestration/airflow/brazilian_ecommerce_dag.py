@@ -1,6 +1,6 @@
 """
-Brazilian E-Commerce ETL Pipeline - Airflow DAG
-Cloud-agnostic orchestration for data engineering pipeline
+Airflow DAG for Brazilian E-Commerce ETL
+Handles Kaggle data download -> cloud storage -> Databricks transformations
 """
 
 from datetime import datetime, timedelta
@@ -17,22 +17,18 @@ from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator
 from airflow.models import Variable
 from airflow.utils.task_group import TaskGroup
 
-# Default arguments
+# Default args for all tasks
 default_args = {
-    'owner': 'data-engineering',
+    'owner': 'data-eng',
     'depends_on_past': False,
     'start_date': datetime(2024, 1, 1),
     'email_on_failure': True,
-    'email_on_retry': False,
     'retries': 2,
     'retry_delay': timedelta(minutes=5),
-    'catchup': False,
-    'tags': ['etl', 'brazilian-ecommerce', 'data-engineering']
 }
 
-# Configuration from Airflow Variables
-def get_config() -> Dict[str, Any]:
-    """Get configuration from Airflow Variables"""
+def get_config():
+    """Fetch config from Airflow vars"""
     return {
         'cloud_provider': Variable.get('CLOUD_PROVIDER', default_var='azure'),
         'storage_account': Variable.get('STORAGE_ACCOUNT', default_var='stbrazilianecommerce'),

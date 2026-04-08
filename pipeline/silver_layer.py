@@ -1,11 +1,5 @@
 """
-SILVER LAYER - Cleaned & Enriched Data
-========================================
-Silver = bronze data with quality issues fixed.
-We apply business rules, fill nulls, cast types, and join related tables.
-This is the layer analysts can trust.
-
-Author: Elisha Theodore
+Silver layer transformations - clean and enrich the raw data
 """
 
 import logging
@@ -20,22 +14,15 @@ def transform_silver(db_path: str) -> dict:
     Read from bronze, clean & enrich, write to silver schema.
     Returns dict of {table_name: row_count}.
     """
-    log.info("=" * 60)
-    log.info("SILVER LAYER — Starting data transformation")
-    log.info("=" * 60)
+    log.info("Transforming to silver...")
 
     con = duckdb.connect(db_path)
     con.execute("CREATE SCHEMA IF NOT EXISTS silver")
 
     results = {}
 
-    # ------------------------------------------------------------------
-    # 1. SILVER ORDERS
-    #    - Cast date strings to proper timestamps
-    #    - Add a derived column: delivery_days (how long did delivery take?)
-    #    - Filter out rows where order_id is null (data quality)
-    # ------------------------------------------------------------------
-    log.info("  → Transforming orders...")
+    # Orders - cast timestamps and calculate delivery metrics
+    log.info("  Processing orders...")
     con.execute("DROP TABLE IF EXISTS silver.orders")
     con.execute("""
         CREATE TABLE silver.orders AS
@@ -70,19 +57,14 @@ def transform_silver(db_path: str) -> dict:
             END AS delivery_status
 
         FROM bronze.orders
-        WHERE order_id IS NOT NULL  -- data quality filter
+        WHERE order_id IS NOT NULL
     """)
     row_count = con.execute("SELECT COUNT(*) FROM silver.orders").fetchone()[0]
     results["orders"] = row_count
-    log.info(f"  ✓ silver.orders              {row_count:>8,} rows")
+    log.info(f"  Orders: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # 2. SILVER ORDER ITEMS
-    #    - Join with products to get category info
-    #    - Join with translations so category names are in English
-    #    - Add total_item_value = price + freight
-    # ------------------------------------------------------------------
-    log.info("  → Transforming order_items...")
+    # Order items with products and translations
+    log.info("  Processing order items...")
     con.execute("DROP TABLE IF EXISTS silver.order_items")
     con.execute("""
         CREATE TABLE silver.order_items AS
@@ -113,14 +95,10 @@ def transform_silver(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM silver.order_items").fetchone()[0]
     results["order_items"] = row_count
-    log.info(f"  ✓ silver.order_items         {row_count:>8,} rows")
+    log.info(f"  Order items: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # 3. SILVER CUSTOMERS
-    #    - Standardise state codes to uppercase
-    #    - Clean city names (trim whitespace)
-    # ------------------------------------------------------------------
-    log.info("  → Transforming customers...")
+    # Customers - basic cleanup
+    log.info("  Processing customers...")
     con.execute("DROP TABLE IF EXISTS silver.customers")
     con.execute("""
         CREATE TABLE silver.customers AS
@@ -135,14 +113,10 @@ def transform_silver(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM silver.customers").fetchone()[0]
     results["customers"] = row_count
-    log.info(f"  ✓ silver.customers           {row_count:>8,} rows")
+    log.info(f"  Customers: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # 4. SILVER ORDER PAYMENTS
-    #    - Cast payment_value to double
-    #    - Flag high-value payments (> R500 equivalent / 500 BRL)
-    # ------------------------------------------------------------------
-    log.info("  → Transforming order_payments...")
+    # Payments
+    log.info("  Processing payments...")
     con.execute("DROP TABLE IF EXISTS silver.order_payments")
     con.execute("""
         CREATE TABLE silver.order_payments AS
@@ -150,22 +124,18 @@ def transform_silver(db_path: str) -> dict:
             order_id,
             payment_sequential,
             payment_type,
-            payment_installments,
             CAST(payment_value AS DOUBLE) AS payment_value,
+            payment_installments,
             CASE WHEN CAST(payment_value AS DOUBLE) > 500 THEN true ELSE false END AS is_high_value
         FROM bronze.order_payments
         WHERE order_id IS NOT NULL
     """)
     row_count = con.execute("SELECT COUNT(*) FROM silver.order_payments").fetchone()[0]
     results["order_payments"] = row_count
-    log.info(f"  ✓ silver.order_payments      {row_count:>8,} rows")
+    log.info(f"  Payments: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # 5. SILVER REVIEWS
-    #    - Keep only reviews with a score
-    #    - Classify sentiment: positive (4-5), neutral (3), negative (1-2)
-    # ------------------------------------------------------------------
-    log.info("  → Transforming order_reviews...")
+    # Reviews
+    log.info("  Processing reviews...")
     con.execute("DROP TABLE IF EXISTS silver.order_reviews")
     con.execute("""
         CREATE TABLE silver.order_reviews AS
@@ -184,12 +154,10 @@ def transform_silver(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM silver.order_reviews").fetchone()[0]
     results["order_reviews"] = row_count
-    log.info(f"  ✓ silver.order_reviews       {row_count:>8,} rows")
+    log.info(f"  Reviews: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # 6. SILVER SELLERS
-    # ------------------------------------------------------------------
-    log.info("  → Transforming sellers...")
+    # Sellers
+    log.info("  Processing sellers...")
     con.execute("DROP TABLE IF EXISTS silver.sellers")
     con.execute("""
         CREATE TABLE silver.sellers AS
@@ -203,12 +171,11 @@ def transform_silver(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM silver.sellers").fetchone()[0]
     results["sellers"] = row_count
-    log.info(f"  ✓ silver.sellers             {row_count:>8,} rows")
+    log.info(f"  Sellers: {row_count:,} rows")
 
     con.close()
 
-    log.info("-" * 60)
-    log.info(f"Silver layer complete. {len(results)} tables transformed.")
+    log.info(f"Silver transformation done. {len(results)} tables")
     return results
 
 

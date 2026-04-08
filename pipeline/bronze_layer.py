@@ -1,12 +1,6 @@
 """
-BRONZE LAYER - Raw Data Ingestion
-==================================
-This is the first layer of the Medallion Architecture.
-Bronze = raw data, exactly as it came from the source.
-We validate it exists and log basic stats, but do NOT transform it yet.
-
-Author: Elisha Theodore
-Dataset: Brazilian E-Commerce (Olist) - https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+Bronze layer - loads raw CSVs into DuckDB
+Just ingest the data as-is, minimal validation
 """
 
 import logging
@@ -45,11 +39,8 @@ def load_bronze(data_dir: str, db_path: str) -> dict:
     data_dir = Path(data_dir)
     results = {}
 
-    log.info("=" * 60)
-    log.info("BRONZE LAYER — Starting raw data ingestion")
-    log.info(f"Data directory : {data_dir.resolve()}")
-    log.info(f"Database path  : {db_path}")
-    log.info("=" * 60)
+    log.info("Loading bronze tables...")
+    log.info(f"Source: {data_dir.resolve()}")
 
     # Connect to DuckDB (creates the file if it doesn't exist)
     con = duckdb.connect(db_path)
@@ -75,11 +66,7 @@ def load_bronze(data_dir: str, db_path: str) -> dict:
         con.execute(f"CREATE TABLE bronze.{table_name} AS SELECT * FROM _tmp_df")
         con.unregister("_tmp_df")
 
-        # Add metadata columns so we know when the data was loaded
-        con.execute(f"""
-            ALTER TABLE bronze.{table_name}
-            ADD COLUMN _ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        """)
+        # TODO: add audit timestamp columns later if needed
 
         results[table_name] = row_count
         log.info(f"  ✓ bronze.{table_name:<20} {row_count:>8,} rows  ← {filename}")

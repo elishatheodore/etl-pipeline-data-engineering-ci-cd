@@ -1,10 +1,6 @@
 """
-DATA QUALITY REPORT
-====================
-Runs checks across bronze → silver → gold and prints a summary.
-This is the output you screenshot for your README / portfolio.
-
-Author: Elisha Theodore
+Data quality report generator
+Prints summary stats across bronze/silver/gold layers
 """
 
 import logging
@@ -18,13 +14,12 @@ def run_quality_report(db_path: str):
     """Print a data quality report across all three layers."""
     con = duckdb.connect(db_path, read_only=True)
 
-    print("\n")
-    print("=" * 70)
-    print("  OLIST E-COMMERCE ETL PIPELINE — DATA QUALITY REPORT")
-    print("=" * 70)
+    print("\n" + "=" * 70)
+    print("OLIST ETL - DATA QUALITY REPORT")
+    print("=" * 70 + "\n")
 
-    # ---- BRONZE ----
-    print("\n📦 BRONZE LAYER (raw ingestion)\n")
+    # Check bronze layer
+    print("BRONZE LAYER\n")
     bronze_tables = [
         "customers", "geolocation", "order_items", "order_payments",
         "order_reviews", "orders", "products", "sellers", "translations"
@@ -37,10 +32,10 @@ def run_quality_report(db_path: str):
             print(f"   bronze.{t:<25} {n:>10,} rows")
         except Exception:
             print(f"   bronze.{t:<25}  ⚠ NOT FOUND")
-    print(f"\n   Total bronze rows: {total_bronze:,}")
+    print(f"\nTotal bronze rows: {total_bronze:,}")
 
-    # ---- SILVER ----
-    print("\n🥈 SILVER LAYER (cleaned & enriched)\n")
+    # Check silver layer
+    print("\nSILVER LAYER\n")
     silver_tables = [
         "orders", "order_items", "customers",
         "order_payments", "order_reviews", "sellers"
@@ -53,10 +48,10 @@ def run_quality_report(db_path: str):
             print(f"   silver.{t:<25} {n:>10,} rows")
         except Exception:
             print(f"   silver.{t:<25}  ⚠ NOT FOUND")
-    print(f"\n   Total silver rows: {total_silver:,}")
+    print(f"\nTotal silver rows: {total_silver:,}")
 
-    # ---- GOLD ----
-    print("\n🥇 GOLD LAYER (star schema / analytics)\n")
+    # Check gold layer
+    print("\nGOLD LAYER\n")
     gold_tables = [
         "fact_orders", "dim_customers", "dim_sellers", "dim_date",
         "agg_monthly_revenue", "agg_category_performance", "agg_seller_performance"
@@ -70,8 +65,52 @@ def run_quality_report(db_path: str):
         except Exception:
             print(f"   gold.{t:<27}  ⚠ NOT FOUND")
 
-    # ---- BUSINESS KPIs ----
-    print("\n📊 KEY BUSINESS METRICS (from gold layer)\n")
+    # Business KPIs
+    print("\nKEY METRICS\n")
+    try:
+        kpis = con.execute("""
+            SELECT
+                COUNT(DISTINCT order_id)                        AS total_orders,
+                COUNT(DISTINCT customer_key)                    AS total_customers,
+                ROUND(SUM(total_revenue), 2)                    AS total_revenue_brl,
+                ROUND(AVG(total_revenue), 2)                    AS avg_order_value,
+                ROUND(AVG(delivery_days), 1)                    AS avg_delivery_days,
+                ROUND(AVG(CAST(review_score AS DOUBLE)), 2)     AS avg_review_score,
+                ROUND(
+                    100.0 * SUM(CASE WHEN delivery_status = 'on_time' THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(CASE WHEN delivery_status != 'unknown' THEN 1 END), 0)
+                , 1) AS on_time_pct
+            FROM gold.fact_orders
+        """).fetchone()
+
+        print(f"   Total orders processed    : {kpis[0]:>10,}")
+        print(f"   Unique customers          : {kpis[1]:>10,}")
+        print(f"   Total revenue (BRL)       : R$ {kpis[2]:>12,.2f}")
+        print(f"   Average order value (BRL) : R$ {kpis[3]:>12,.2f}")
+        print(f"   Avg delivery time (days)  : {kpis[4]:>10}")
+        print(f"   Average review score      : {kpis[5]:>10} / 5.0")
+        print(f"   On-time delivery rate     : {kpis[6]:>10}%")
+    except Exception as e:
+        print(f"   ⚠ Could not compute KPIs: {e}")
+    print(f"\nTotal silver rows: {total_silver:,}")
+
+    # Check gold layer
+    print("\nGOLD LAYER\n")
+    gold_tables = [
+        "fact_orders", "dim_customers", "dim_sellers", "dim_date",
+        "agg_monthly_revenue", "agg_category_performance", "agg_seller_performance"
+    ]
+    total_gold = 0
+    for t in gold_tables:
+        try:
+            n = con.execute(f"SELECT COUNT(*) FROM gold.{t}").fetchone()[0]
+            total_gold += n
+            print(f"   gold.{t:<27} {n:>10,} rows")
+        except Exception:
+            print(f"   gold.{t:<27}  ⚠ NOT FOUND")
+
+    # Business KPIs
+    print("\nKEY METRICS\n")
     try:
         kpis = con.execute("""
             SELECT

@@ -1,19 +1,5 @@
 """
-GOLD LAYER - Star Schema for Analytics
-========================================
-Gold = business-ready aggregated tables.
-These are what a Power BI dashboard or Synapse Analytics query would read.
-
-Star Schema:
-  - fact_orders       (one row per order)
-  - dim_customers     (who bought)
-  - dim_sellers       (who sold)
-  - dim_date          (when)
-  - agg_monthly_revenue       (monthly KPI rollup)
-  - agg_category_performance  (product category KPIs)
-  - agg_seller_performance    (seller scorecards)
-
-Author: Elisha Theodore
+Gold layer - builds analytics schema with facts and dimensions
 """
 
 import logging
@@ -28,20 +14,15 @@ def build_gold(db_path: str) -> dict:
     Build gold layer star schema from silver tables.
     Returns dict of {table_name: row_count}.
     """
-    log.info("=" * 60)
-    log.info("GOLD LAYER — Building analytics star schema")
-    log.info("=" * 60)
+    log.info("Building gold star schema...")
 
     con = duckdb.connect(db_path)
     con.execute("CREATE SCHEMA IF NOT EXISTS gold")
 
     results = {}
 
-    # ------------------------------------------------------------------
-    # DIMENSION: dim_date
-    #   Generate a date spine from 2016 to 2019 (range of Olist data)
-    # ------------------------------------------------------------------
-    log.info("  → Building dim_date...")
+    # Date dimension
+    log.info("  Creating date dimension...")
     con.execute("DROP TABLE IF EXISTS gold.dim_date")
     con.execute("""
         CREATE TABLE gold.dim_date AS
@@ -66,12 +47,10 @@ def build_gold(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM gold.dim_date").fetchone()[0]
     results["dim_date"] = row_count
-    log.info(f"  ✓ gold.dim_date              {row_count:>8,} rows")
+    log.info(f"  Date dimension: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # DIMENSION: dim_customers
-    # ------------------------------------------------------------------
-    log.info("  → Building dim_customers...")
+    # Customer dimension
+    log.info("  Creating customer dimension...")
     con.execute("DROP TABLE IF EXISTS gold.dim_customers")
     con.execute("""
         CREATE TABLE gold.dim_customers AS
@@ -85,12 +64,10 @@ def build_gold(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM gold.dim_customers").fetchone()[0]
     results["dim_customers"] = row_count
-    log.info(f"  ✓ gold.dim_customers         {row_count:>8,} rows")
+    log.info(f"  Customers: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # DIMENSION: dim_sellers
-    # ------------------------------------------------------------------
-    log.info("  → Building dim_sellers...")
+    # Seller dimension
+    log.info("  Creating seller dimension...")
     con.execute("DROP TABLE IF EXISTS gold.dim_sellers")
     con.execute("""
         CREATE TABLE gold.dim_sellers AS
@@ -103,13 +80,10 @@ def build_gold(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM gold.dim_sellers").fetchone()[0]
     results["dim_sellers"] = row_count
-    log.info(f"  ✓ gold.dim_sellers           {row_count:>8,} rows")
+    log.info(f"  Sellers: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # FACT: fact_orders
-    #   One row per order. Joins orders + payments + reviews + items
-    # ------------------------------------------------------------------
-    log.info("  → Building fact_orders...")
+    # Orders fact table
+    log.info("  Creating fact_orders...")
     con.execute("DROP TABLE IF EXISTS gold.fact_orders")
     con.execute("""
         CREATE TABLE gold.fact_orders AS
@@ -148,7 +122,6 @@ def build_gold(db_path: str) -> dict:
                 order_id,
                 SUM(payment_value)          AS total_revenue,
                 MAX(payment_installments)   AS payment_installments,
-                -- Pick the dominant payment type
                 FIRST(payment_type ORDER BY payment_value DESC) AS payment_type
             FROM silver.order_payments
             GROUP BY order_id
@@ -172,7 +145,6 @@ def build_gold(db_path: str) -> dict:
                 COUNT(DISTINCT product_id)  AS unique_products,
                 COUNT(DISTINCT seller_id)   AS unique_sellers,
                 SUM(freight_value)          AS total_freight,
-                -- Most common category in this order
                 FIRST(product_category ORDER BY price DESC) AS top_category
             FROM silver.order_items
             GROUP BY order_id
@@ -180,13 +152,10 @@ def build_gold(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM gold.fact_orders").fetchone()[0]
     results["fact_orders"] = row_count
-    log.info(f"  ✓ gold.fact_orders           {row_count:>8,} rows")
+    log.info(f"  Fact orders: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # AGGREGATE: agg_monthly_revenue
-    #   Monthly KPI rollup — this is what Power BI charts would use
-    # ------------------------------------------------------------------
-    log.info("  → Building agg_monthly_revenue...")
+    # Monthly revenue aggregation
+    log.info("  Creating monthly revenue table...")
     con.execute("DROP TABLE IF EXISTS gold.agg_monthly_revenue")
     con.execute("""
         CREATE TABLE gold.agg_monthly_revenue AS
@@ -209,12 +178,10 @@ def build_gold(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM gold.agg_monthly_revenue").fetchone()[0]
     results["agg_monthly_revenue"] = row_count
-    log.info(f"  ✓ gold.agg_monthly_revenue   {row_count:>8,} rows")
+    log.info(f"  Monthly revenue: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # AGGREGATE: agg_category_performance
-    # ------------------------------------------------------------------
-    log.info("  → Building agg_category_performance...")
+    # Category performance
+    log.info("  Creating category performance table...")
     con.execute("DROP TABLE IF EXISTS gold.agg_category_performance")
     con.execute("""
         CREATE TABLE gold.agg_category_performance AS
@@ -228,19 +195,16 @@ def build_gold(db_path: str) -> dict:
             ROUND(AVG(CAST(r.review_score AS DOUBLE)), 2) AS avg_review_score
         FROM silver.order_items oi
         LEFT JOIN silver.order_reviews r ON oi.order_id = r.order_id
-        WHERE product_category IS NOT NULL
-          AND product_category != 'unknown'
+        WHERE product_category IS NOT NULL AND product_category != 'unknown'
         GROUP BY 1
         ORDER BY total_revenue DESC
     """)
     row_count = con.execute("SELECT COUNT(*) FROM gold.agg_category_performance").fetchone()[0]
     results["agg_category_performance"] = row_count
-    log.info(f"  ✓ gold.agg_category_performance {row_count:>6,} rows")
+    log.info(f"  Category performance: {row_count:,} rows")
 
-    # ------------------------------------------------------------------
-    # AGGREGATE: agg_seller_performance
-    # ------------------------------------------------------------------
-    log.info("  → Building agg_seller_performance...")
+    # Seller performance
+    log.info("  Creating seller performance table...")
     con.execute("DROP TABLE IF EXISTS gold.agg_seller_performance")
     con.execute("""
         CREATE TABLE gold.agg_seller_performance AS
@@ -263,15 +227,15 @@ def build_gold(db_path: str) -> dict:
     """)
     row_count = con.execute("SELECT COUNT(*) FROM gold.agg_seller_performance").fetchone()[0]
     results["agg_seller_performance"] = row_count
-    log.info(f"  ✓ gold.agg_seller_performance {row_count:>7,} rows")
+    log.info(f"  Seller performance: {row_count:,} rows")
 
     con.close()
 
-    log.info("-" * 60)
-    log.info(f"Gold layer complete. {len(results)} tables built.")
+    log.info(f"Gold layer done. {len(results)} tables")
     return results
 
 
 if __name__ == "__main__":
     root = Path(__file__).parent.parent
+    build_gold(db_path=str(root / "olist.duckdb"))
     build_gold(db_path=str(root / "olist.duckdb"))

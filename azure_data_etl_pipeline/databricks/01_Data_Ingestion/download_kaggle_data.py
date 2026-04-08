@@ -1,17 +1,16 @@
-# Databricks notebook source
-# MAGIC %md
-# MAGIC # Brazilian E-Commerce Data Ingestion
-# MAGIC 
-# MAGIC This notebook downloads the Brazilian E-Commerce dataset from Kaggle and uploads it to Azure Data Lake Storage.
-# MAGIC 
-# MAGIC ## Architecture
-# MAGIC ```
-# MAGIC Kaggle API → Local Download → Azure Data Lake Storage (Raw Layer)
-# MAGIC ```
+# Databricks data ingestion notebook
+# Downloads Olist dataset from Kaggle and uploads to Azure Data Lake
 
 # COMMAND ----------
 
-# Install required libraries
+# MAGIC %md
+# MAGIC # Data Ingestion
+# MAGIC 
+# MAGIC Pulls data from Kaggle and pushes to Azure storage
+
+# COMMAND ----------
+
+# Install deps
 %pip install kaggle azure-storage-file-datalake azure-identity pandas
 
 # COMMAND ----------
@@ -33,16 +32,16 @@ from azure.core.exceptions import AzureError
 
 # COMMAND ----------
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Setup logging
+import logging
 logger = logging.getLogger(__name__)
 
 # COMMAND ----------
 
 # Get parameters from ADF
+dbutils.widgets.text("kaggle_dataset", "olistbr/brazilian-ecommerce")
+dbutils.widgets.text("azure_storage_account", "stbrazilianecommerce")
+dbutilwidget parameters
 dbutils.widgets.text("kaggle_dataset", "olistbr/brazilian-ecommerce")
 dbutils.widgets.text("azure_storage_account", "stbrazilianecommerce")
 dbutils.widgets.text("container_name", "brazilian-ecommerce-raw")
@@ -51,31 +50,27 @@ kaggle_dataset = dbutils.widgets.get("kaggle_dataset")
 storage_account = dbutils.widgets.get("azure_storage_account")
 container_name = dbutils.widgets.get("container_name")
 
-logger.info(f"Parameters: dataset={kaggle_dataset}, storage={storage_account}, container={container_name}")
-
-# COMMAND ----------
-
+logger.info(f"Starting ingestion: {kaggle_dataset
 class KaggleDataDownloader:
     """Downloads and processes Brazilian E-Commerce dataset from Kaggle"""
     
+    def __iniownloader:
+    """Handles Kaggle dataset downloads and cloud uploads"""
+    
     def __init__(self, dataset_name: str):
         self.dataset_name = dataset_name
-        self.local_data_path = Path("/tmp/raw_data")
-        
-    def setup_directories(self):
-        """Create necessary directories"""
-        self.local_data_path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created directory: {self.local_data_path}")
+        self.localtemp directories"""
+        self.local_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created directory: {self.local_path}")
     
     def download_dataset(self) -> bool:
-        """Download dataset from Kaggle"""
+        """Download from Kaggle"""
         try:
-            logger.info(f"Downloading dataset: {self.dataset_name}")
-            
+            logger.info(f"Downloading: {self.dataset_name}")
             # Download dataset
             kaggle.api.dataset_download_files(
                 self.dataset_name,
-                path=str(self.local_data_path),
+                path=str(self.local_path),
                 unzip=True
             )
             
